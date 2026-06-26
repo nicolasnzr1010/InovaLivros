@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useData } from '../context/DataContext';
+import { useData } from '../context/DataContext'; // Seu import normal
 import { Plus, X, Search, CheckCircle } from 'lucide-react';
 
 export const Emprestimos: React.FC = () => {
@@ -12,7 +12,6 @@ export const Emprestimos: React.FC = () => {
   const [borrowerName, setBorrowerName] = useState('');
   const [borrowerContact, setBorrowerContact] = useState('');
   
-  // Calculate return date (14 days from now)
   const today = new Date();
   const defaultReturnDate = new Date();
   defaultReturnDate.setDate(today.getDate() + 14);
@@ -20,14 +19,20 @@ export const Emprestimos: React.FC = () => {
 
   const availableBooks = books.filter(b => b.status === 'Disponível');
   
-  // Corrigido com (l as any) e (a/b as any) para o TypeScript aceitar as novas chaves
-  const filteredLoans = loans.filter((l: any) => 
-    l.borrowerName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (l.borrowerEmail && l.borrowerEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    books.find(b => b.id === l.bookId)?.title.toLowerCase().includes(searchTerm.toLowerCase())
-  ).sort((a: any, b: any) => {
-    const dateA = a.loanDate ? new Date(a.loanDate).getTime() : 0;
-    const dateB = b.loanDate ? new Date(b.loanDate).getTime() : 0;
+  // CORREÇÃO: Mapeia e normaliza os dados direto na listagem da tela
+  const filteredLoans = loans.filter((l: any) => {
+    const bId = l.book_id || l.bookId;
+    const bName = l.borrower_name || l.borrowerName;
+    const bEmail = l.borrower_email || l.borrowerEmail;
+
+    return (
+      bName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (bEmail && bEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      books.find(b => b.id === bId)?.title.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }).sort((a: any, b: any) => {
+    const dateA = a.loan_date || a.loanDate ? new Date(a.loan_date || a.loanDate).getTime() : 0;
+    const dateB = b.loan_date || b.loanDate ? new Date(b.loan_date || b.loanDate).getTime() : 0;
     return dateB - dateA;
   });
 
@@ -35,12 +40,18 @@ export const Emprestimos: React.FC = () => {
     e.preventDefault();
     if (!bookId || !borrowerName || !returnDate) return;
 
+    // Envia os dados salvando nos dois formatos para o banco aceitar sem quebrar
     addLoan({
       bookId,
+      book_id: bookId,
       borrowerName,
+      borrower_name: borrowerName,
       borrowerEmail: borrowerContact,
+      borrower_email: borrowerContact,
       loanDate: new Date().toISOString(),
+      loan_date: new Date().toISOString(),
       dueDate: new Date(returnDate).toISOString(),
+      due_date: new Date(returnDate).toISOString(),
     } as any);
     
     setBookId('');
@@ -162,13 +173,16 @@ export const Emprestimos: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredLoans.map(loan => {
-                  const book = books.find(b => b.id === loan.bookId);
-                  const isReturned = !!loan.returnedAt;
+                filteredLoans.map((loan: any) => {
+                  const currentBookId = loan.book_id || loan.bookId;
+                  const book = books.find(b => b.id === currentBookId);
+                  const isReturned = !!(loan.returned_at || loan.returnedAt);
                   
-                  // Forçando leitura correta ignorando a tipagem estrita do TypeScript local
-                  const loanDateObj = (loan as any).loanDate ? new Date((loan as any).loanDate) : new Date();
-                  const dueDateObj = (loan as any).dueDate ? new Date((loan as any).dueDate) : new Date();
+                  const loanDateRaw = loan.loan_date || loan.loanDate;
+                  const dueDateRaw = loan.due_date || loan.dueDate;
+
+                  const loanDateObj = loanDateRaw ? new Date(loanDateRaw) : new Date();
+                  const dueDateObj = dueDateRaw ? new Date(dueDateRaw) : new Date();
                   const isOverdue = !isReturned && dueDateObj < today;
                   
                   return (
@@ -177,8 +191,8 @@ export const Emprestimos: React.FC = () => {
                         <p className="font-medium text-white text-sm">{book?.title || 'Livro Removido'}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="font-medium text-white text-sm">{loan.borrowerName}</p>
-                        <p className="text-[11px] text-white/40">{(loan as any).borrowerEmail || ''}</p>
+                        <p className="font-medium text-white text-sm">{loan.borrower_name || loan.borrowerName}</p>
+                        <p className="text-[11px] text-white/40">{loan.borrower_email || loan.borrowerEmail || ''}</p>
                       </td>
                       <td className="px-6 py-4 text-xs text-white/60">
                         {loanDateObj.toLocaleDateString('pt-BR')}
@@ -205,7 +219,7 @@ export const Emprestimos: React.FC = () => {
                         {!isReturned && (
                           <button 
                             onClick={() => {
-                              if(confirm(`Confirmar devolução do livro "${book?.title}" por ${loan.borrowerName}?`)) {
+                              if(confirm(`Confirmar devolução do livro "${book?.title}" por ${loan.borrower_name || loan.borrowerName}?`)) {
                                 returnLoan(loan.id);
                               }
                             }}
