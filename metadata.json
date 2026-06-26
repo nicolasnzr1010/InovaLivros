@@ -1,0 +1,8 @@
+{
+  "name": "Guarapuava InovaLivros",
+  "description": "Sistema de catalogação e gestão de empréstimo de livros para a Secretaria de Ciência, Tecnologia e Inovação de Guarapuava.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
