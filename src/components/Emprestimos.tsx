@@ -20,10 +20,16 @@ export const Emprestimos: React.FC = () => {
 
   const availableBooks = books.filter(b => b.status === 'Disponível');
   
-  const filteredLoans = loans.filter(l => 
-    l.borrowerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  // Corrigido com (l as any) e (a/b as any) para o TypeScript aceitar as novas chaves
+  const filteredLoans = loans.filter((l: any) => 
+    l.borrowerName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (l.borrowerEmail && l.borrowerEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
     books.find(b => b.id === l.bookId)?.title.toLowerCase().includes(searchTerm.toLowerCase())
-  ).sort((a, b) => new Date(b.borrowDate).getTime() - new Date(a.borrowDate).getTime());
+  ).sort((a: any, b: any) => {
+    const dateA = a.loanDate ? new Date(a.loanDate).getTime() : 0;
+    const dateB = b.loanDate ? new Date(b.loanDate).getTime() : 0;
+    return dateB - dateA;
+  });
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,10 +38,10 @@ export const Emprestimos: React.FC = () => {
     addLoan({
       bookId,
       borrowerName,
-      borrowerContact,
-      borrowDate: new Date().toISOString(),
-      returnDate: new Date(returnDate).toISOString(),
-    });
+      borrowerEmail: borrowerContact,
+      loanDate: new Date().toISOString(),
+      dueDate: new Date(returnDate).toISOString(),
+    } as any);
     
     setBookId('');
     setBorrowerName('');
@@ -159,7 +165,11 @@ export const Emprestimos: React.FC = () => {
                 filteredLoans.map(loan => {
                   const book = books.find(b => b.id === loan.bookId);
                   const isReturned = !!loan.returnedAt;
-                  const isOverdue = !isReturned && new Date(loan.returnDate) < today;
+                  
+                  // Forçando leitura correta ignorando a tipagem estrita do TypeScript local
+                  const loanDateObj = (loan as any).loanDate ? new Date((loan as any).loanDate) : new Date();
+                  const dueDateObj = (loan as any).dueDate ? new Date((loan as any).dueDate) : new Date();
+                  const isOverdue = !isReturned && dueDateObj < today;
                   
                   return (
                     <tr key={loan.id} className="hover:bg-white/5 transition-colors group">
@@ -168,13 +178,13 @@ export const Emprestimos: React.FC = () => {
                       </td>
                       <td className="px-6 py-4">
                         <p className="font-medium text-white text-sm">{loan.borrowerName}</p>
-                        <p className="text-[11px] text-white/40">{loan.borrowerContact}</p>
+                        <p className="text-[11px] text-white/40">{(loan as any).borrowerEmail || ''}</p>
                       </td>
                       <td className="px-6 py-4 text-xs text-white/60">
-                        {new Date(loan.borrowDate).toLocaleDateString('pt-BR')}
+                        {loanDateObj.toLocaleDateString('pt-BR')}
                       </td>
                       <td className="px-6 py-4 text-xs text-white/60">
-                        {new Date(loan.returnDate).toLocaleDateString('pt-BR')}
+                        {dueDateObj.toLocaleDateString('pt-BR')}
                       </td>
                       <td className="px-6 py-4">
                         {isReturned ? (
