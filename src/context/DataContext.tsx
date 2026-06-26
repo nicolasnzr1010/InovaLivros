@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Book, Loan, BookCondition } from '../types';
+import { Book, Loan } from '../types';
+import { supabase } from '../supabaseClient'; 
 
 interface DataContextType {
   books: Book[];
@@ -13,100 +14,95 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-const BOOKS_KEY = '@inovalivros/books';
-const LOANS_KEY = '@inovalivros/loans';
-
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
 
+  // Carrega apenas os dados reais do Supabase ao iniciar
   useEffect(() => {
-    const storedBooks = localStorage.getItem(BOOKS_KEY);
-    const storedLoans = localStorage.getItem(LOANS_KEY);
+    const fetchInitialData = async () => {
+      // 1. Busca os livros cadastrados
+      const { data: fetchedBooks, error: booksError } = await supabase
+        .from('books')
+        .select('*');
+      
+      if (!booksError && fetchedBooks) {
+        setBooks(fetchedBooks as Book[]);
+      }
 
-    if (storedBooks) {
-      setBooks(JSON.parse(storedBooks));
-    } else {
-      // Mock data
-      const initialBooks: Book[] = [
-        {
-          id: generateId(),
-          title: 'A Lógica da Pesquisa Científica',
-          author: 'Karl Popper',
-          photoUrl: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=400',
-          condition: 'Bom',
-          status: 'Disponível',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: generateId(),
-          title: 'Sapiens: Uma Breve História da Humanidade',
-          author: 'Yuval Noah Harari',
-          photoUrl: 'https://images.unsplash.com/photo-1589829085413-56de8ae18c73?auto=format&fit=crop&q=80&w=400',
-          condition: 'Novo',
-          status: 'Disponível',
-          createdAt: new Date().toISOString(),
-        }
-      ];
-      setBooks(initialBooks);
-      localStorage.setItem(BOOKS_KEY, JSON.stringify(initialBooks));
-    }
+      // 2. Busca os empréstimos cadastrados
+      const { data: fetchedLoans, error: loansError } = await supabase
+        .from('loans')
+        .select('*');
 
-    if (storedLoans) {
-      setLoans(JSON.parse(storedLoans));
-    }
+      if (!loansError && fetchedLoans) {
+        setLoans(fetchedLoans as Loan[]);
+      }
+    };
+
+    fetchInitialData();
   }, []);
 
-  const saveBooks = (newBooks: Book[]) => {
-    setBooks(newBooks);
-    localStorage.setItem(BOOKS_KEY, JSON.stringify(newBooks));
-  };
-
-  const saveLoans = (newLoans: Loan[]) => {
-    setLoans(newLoans);
-    localStorage.setItem(LOANS_KEY, JSON.stringify(newLoans));
-  };
-
-  const addBook = (bookData: Omit<Book, 'id' | 'status' | 'createdAt'>) => {
+  const addBook = async (bookData: Omit<Book, 'id' | 'status' | 'createdAt'>) => {
     const newBook: Book = {
       ...bookData,
       id: generateId(),
       status: 'Disponível',
       createdAt: new Date().toISOString(),
     };
-    saveBooks([...books, newBook]);
+
+    setBooks((prev: Book[]) => [...prev, newBook]);
+
+    const { error } = await supabase.from('books').insert([newBook]);
+    if (error) console.error('Erro no Supabase:', error);
   };
 
-  const updateBook = (id: string, updates: Partial<Book>) => {
-    const updatedBooks = books.map((b) => (b.id === id ? { ...b, ...updates } : b));
-    saveBooks(updatedBooks);
+  const updateBook = async (id: string, updates: Partial<Book>) => {
+    setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === id ? { ...b, ...updates } : b)));
+
+    const { error } = await supabase.from('books').update(updates).eq('id', id);
+    if (error) console.error('Erro no Supabase:', error);
   };
 
-  const deleteBook = (id: string) => {
-    saveBooks(books.filter((b) => b.id !== id));
-    // Optionally handle active loans for this book
+  const deleteBook = async (id: string) => {
+    setBooks((prev: Book[]) => prev.filter((b: Book) => b.id !== id));
+
+    const { error } = await supabase.from('books').delete().eq('id', id);
+    if (error) console.error('Erro no Supabase:', error);
   };
 
-  const addLoan = (loanData: Omit<Loan, 'id' | 'returnedAt'>) => {
+  const addLoan = async (loanData: Omit<Loan, 'id' | 'returnedAt'>) => {
     const newLoan: Loan = {
       ...loanData,
       id: generateId(),
     };
-    saveLoans([...loans, newLoan]);
-    updateBook(loanData.bookId, { status: 'Emprestado' });
+
+    setLoans((prev: Loan[]) => [...prev, newLoan]);
+    setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loanData.bookId ? { ...b, status: 'Emprestado' } : b)));
+
+    const { error: loanError } = await supabase.from('loans').insert([newLoan]);
+    if (loanError) console.error('Erro no Supabase:', loanError);
+
+    const { error: bookError } = await supabase.from('books').update({ status: 'Emprestado' }).eq('id', loanData.bookId);
+    if (bookError) console.error('Erro no Supabase:', bookError);
   };
 
-  const returnLoan = (id: string) => {
-    const loan = loans.find((l) => l.id === id);
+  const returnLoan = async (id: string) => {
+    const loan = loans.find((l: Loan) => l.id === id);
     if (!loan) return;
 
-    const updatedLoans = loans.map((l) =>
-      l.id === id ? { ...l, returnedAt: new Date().toISOString() } : l
-    );
-    saveLoans(updatedLoans);
-    updateBook(loan.bookId, { status: 'Disponível' });
+    const returnedAt = new Date().toISOString();
+
+    setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt } : l)));
+    setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loan.bookId ? { ...b, status: 'Disponível' } : b)));
+
+    const { error: loanError } = await supabase.from('loans').update({ returnedAt }).eq('id', id);
+    if (loanError) console.error('Erro no Supabase:', loanError);
+
+    const { error: bookError } = await supabase.from('books').update({ status: 'Disponível' }).eq('id', loan.bookId);
+    if (bookError) console.error('Erro no Supabase:', bookError);
   };
 
   return (
