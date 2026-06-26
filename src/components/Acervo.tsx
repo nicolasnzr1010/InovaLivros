@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useData } from '../context/DataContext';
-import { Plus, Search, X } from 'lucide-react';
+import { Plus, Search, X, Upload, Image as ImageIcon } from 'lucide-react';
 import { BookCondition } from '../types';
+import { supabase } from '../supabaseClient'; // Conexão necessária para o Storage
 
 export const Acervo: React.FC = () => {
   const { books, addBook, deleteBook } = useData();
@@ -13,11 +14,72 @@ export const Acervo: React.FC = () => {
   const [author, setAuthor] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [condition, setCondition] = useState<BookCondition>('Bom');
+  
+  // Upload State
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredBooks = books.filter(b => 
     b.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
     b.author.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Função para fazer o upload do arquivo para o Supabase Storage
+  const handleFileUpload = async (file: File) => {
+    try {
+      setUploading(true);
+      
+      // Gera um nome único para o arquivo evitando duplicados
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      // Envia o arquivo para o bucket 'capas'
+      const { error: uploadError } = await supabase.storage
+        .from('capas')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Pega a URL pública gerada pelo Supabase
+      const { data } = supabase.storage.from('capas').getPublicUrl(filePath);
+      setPhotoUrl(data.publicUrl);
+
+    } catch (error) {
+      console.error('Erro ao fazer upload da imagem:', error);
+      alert('Falha ao enviar a imagem. Verifique as configurações do Storage.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Gerenciadores do Arrastar e Soltar (Drag and Drop)
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileUpload(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileUpload(e.target.files[0]);
+    }
+  };
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,17 +141,48 @@ export const Acervo: React.FC = () => {
                 placeholder="Ex: Dan Brown"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] text-white/50 uppercase font-bold tracking-widest">URL da Capa (Opcional)</label>
-              <input 
-                type="url" 
-                value={photoUrl}
-                onChange={e => setPhotoUrl(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500/50 focus:border-transparent outline-none placeholder:text-white/20"
-                placeholder="https://..."
-              />
+
+            {/* Zona Avançada de Upload Drag and Drop */}
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-[10px] text-white/50 uppercase font-bold tracking-widest">Capa do Livro (Arraste ou Selecione)</label>
+              <div 
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`w-full border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all ${
+                  dragActive ? 'border-blue-500 bg-blue-500/10' : 'border-white/20 bg-white/5 hover:bg-white/10'
+                }`}
+              >
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/*"
+                  className="hidden"
+                />
+                
+                {uploading ? (
+                  <p className="text-sm text-blue-400 animate-pulse">Enviando imagem para o servidor...</p>
+                ) : photoUrl ? (
+                  <div className="flex items-center gap-3 bg-emerald-500/20 border border-emerald-500/30 px-4 py-2 rounded-lg text-emerald-400">
+                    <ImageIcon className="w-5 h-5" />
+                    <span className="text-xs font-medium truncate max-w-xs">Imagem carregada com sucesso!</span>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="w-8 h-8 text-white/40" />
+                    <p className="text-sm text-white/60 text-center">
+                      Arraste e solte a imagem aqui, ou <span className="text-blue-400 font-medium">procure no computador</span>
+                    </p>
+                    <p className="text-[10px] text-white/30">Suporta PNG, JPG ou WEBP</p>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="space-y-1">
+
+            <div className="md:col-span-2 space-y-1">
               <label className="text-[10px] text-white/50 uppercase font-bold tracking-widest">Estado de Conservação</label>
               <select 
                 value={condition}
@@ -103,7 +196,11 @@ export const Acervo: React.FC = () => {
               </select>
             </div>
             <div className="md:col-span-2 pt-2">
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition-colors shadow-lg">
+              <button 
+                type="submit" 
+                disabled={uploading}
+                className={`w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition-colors shadow-lg ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
                 Salvar Livro
               </button>
             </div>
