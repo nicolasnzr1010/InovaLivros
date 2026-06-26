@@ -16,17 +16,6 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
-// FUNÇÕES AUXILIARES DE MAPEAMENTO (Tradutor Snake_case <-> CamelCase)
-const mapDbToLoan = (db: any): Loan => ({
-  id: db.id,
-  bookId: db.book_id,
-  borrowerName: db.borrower_name,
-  borrowerContact: db.borrower_email, // Mapeia borrower_email do banco para borrowerContact do TS
-  borrowDate: db.loan_date,
-  returnDate: db.due_date, // Mapeia due_date do banco para returnDate do TS
-  returnedAt: db.returned_at || undefined // Garante que nulos do banco virem undefined no TS
-});
-
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -43,16 +32,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setBooks(fetchedBooks as Book[]);
       }
 
-      // 2. Busca e normaliza os empréstimos cadastrados
+      // 2. Busca os empréstimos cadastrados na tabela CORRETA 'emprestimos'
       const { data: fetchedLoans, error: loansError } = await supabase
-        .from('loans')
-        .select('*')
-        .order('loan_date', { ascending: false });
+        .from('emprestimos') // 👈 Alterado de 'loans' para 'emprestimos'
+        .select('*');
 
       if (!loansError && fetchedLoans) {
-        // Conversão crucial aplicada aqui!
-        const normalizedLoans = fetchedLoans.map(mapDbToLoan);
-        setLoans(normalizedLoans);
+        const formattedLoans = fetchedLoans.map((l: any) => ({
+          ...l,
+          returnedAt: l.returnedAt || undefined
+        }));
+        setLoans(formattedLoans);
       }
     };
 
@@ -90,34 +80,36 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addLoan = async (loanData: Omit<Loan, 'id' | 'returnedAt'>) => {
     const loanId = generateId();
     
-    // Objeto no padrão CamelCase para o Estado do React (atendendo ao tipo do TS)
     const newLoan: Loan = {
-      ...loanData,
       id: loanId,
-      returnedAt: undefined, // Corrigido para satisfazer string | undefined
+      bookId: loanData.bookId,
+      borrowerName: loanData.borrowerName,
+      borrowerContact: loanData.borrowerContact,
+      borrowDate: loanData.borrowDate || new Date().toISOString(),
+      returnDate: loanData.returnDate,
+      returnedAt: undefined,
     };
 
-    // Objeto traduzido para o padrão Snake_case exigido pelo Postgres/Supabase
-    const dbPayload = {
-      id: loanId,
-      book_id: loanData.bookId,
-      borrower_name: loanData.borrowerName,
-      borrower_email: loanData.borrowerContact,
-      loan_date: loanData.borrowDate || new Date().toISOString(),
-      due_date: loanData.returnDate,
-      returned_at: null // Mantido null para registrar ausência de valor no banco
-    };
-
-    // Atualiza estados locais de forma imediata e limpa
+    // Atualiza estados locais imediatamente
     setLoans((prev: Loan[]) => [newLoan, ...prev]);
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loanData.bookId ? { ...b, status: 'Emprestado' } : b)));
 
-    // Envia o payload correto em snake_case para o banco
-    const { error: loanError } = await supabase.from('loans').insert([dbPayload]);
-    if (loanError) console.error('Erro no Supabase (addLoan - loans):', loanError);
+    // Insere na tabela 'emprestimos' 
+    const { error: loanError } = await supabase.from('emprestimos').insert([ // 👈 Alterado aqui
+      {
+        id: newLoan.id,
+        bookId: newLoan.bookId,
+        borrowerName: newLoan.borrowerName,
+        borrowerEmail: newLoan.borrowerContact, 
+        loanDate: newLoan.borrowDate,
+        dueDate: newLoan.returnDate,           
+        returnedAt: null
+      }
+    ]);
+    if (loanError) console.error('Erro no Supabase ao inserir empréstimo:', loanError.message);
 
     const { error: bookError } = await supabase.from('books').update({ status: 'Emprestado' }).eq('id', loanData.bookId);
-    if (bookError) console.error('Erro no Supabase (addLoan - books):', bookError);
+    if (bookError) console.error('Erro no Supabase ao atualizar livro:', bookError.message);
   };
 
   const returnLoan = async (id: string) => {
@@ -126,16 +118,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const returnedAt = new Date().toISOString();
 
-    // Atualiza estados locais
     setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt } : l)));
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loan.bookId ? { ...b, status: 'Disponível' } : b)));
 
-    // Envia o update usando a chave correta da coluna do Postgres (returned_at)
-    const { error: loanError } = await supabase.from('loans').update({ returned_at: returnedAt }).eq('id', id);
-    if (loanError) console.error('Erro no Supabase (returnLoan - loans):', loanError);
+    // Atualiza na tabela 'emprestimos'
+    const { error: loanError } = await supabase.from('emprestimos').update({ returnedAt }).eq('id', id); // 👈 Alterado aqui
+    if (loanError) console.error('Erro no Supabase ao devolver:', loanError.message);
 
     const { error: bookError } = await supabase.from('books').update({ status: 'Disponível' }).eq('id', loan.bookId);
-    if (bookError) console.error('Erro no Supabase (returnLoan - books):', bookError);
+    if (bookError) console.error('Erro no Supabase ao liberar livro:', bookError.message);
   };
 
   return (
