@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { useData } from '../context/DataContext'; // Seu import normal
+import { useData } from '../context/DataContext'; 
 import { Plus, X, Search, CheckCircle } from 'lucide-react';
+import { Loan } from '../types'; // Certifique-se de importar o tipo Loan original
 
 export const Emprestimos: React.FC = () => {
-  const { books, loans, addLoan, returnLoan } = useData();
+  const { books, loans: rawLoans, addLoan, returnLoan } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
@@ -19,28 +20,42 @@ export const Emprestimos: React.FC = () => {
 
   const availableBooks = books.filter(b => b.status === 'Disponível');
   
-  // CORREÇÃO: Mapeia e normaliza os dados direto na listagem da tela
-  const filteredLoans = loans.filter((l: any) => {
-    const bId = l.book_id || l.bookId;
-    const bName = l.borrower_name || l.borrowerName;
-    const bEmail = l.borrower_email || l.borrowerEmail;
+  // 1. NORMALIZAÇÃO: Garante que os dados brutos (rawLoans) sigam o contrato do tipo Loan (camelCase)
+  const normalizedLoans: Loan[] = (rawLoans || []).map((l: any) => ({
+    id: l.id,
+    bookId: l.book_id || l.bookId,
+    borrowerName: l.borrower_name || l.borrowerName,
+    borrowerContact: l.borrower_email || l.borrowerContact || l.borrowerEmail,
+    borrowDate: l.loan_date || l.borrowDate || l.loanDate,
+    returnDate: l.due_date || l.returnDate || l.dueDate,
+    returnedAt: l.returned_at !== undefined ? l.returned_at : l.returnedAt
+  }));
 
-    return (
-      bName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      (bEmail && bEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      books.find(b => b.id === bId)?.title.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }).sort((a: any, b: any) => {
-    const dateA = a.loan_date || a.loanDate ? new Date(a.loan_date || a.loanDate).getTime() : 0;
-    const dateB = b.loan_date || b.loanDate ? new Date(b.loan_date || b.loanDate).getTime() : 0;
-    return dateB - dateA;
-  });
+  // 2. FILTRAGEM E ORDENAÇÃO: Agora utiliza propriedades 100% tipadas em camelCase
+  const filteredLoans = normalizedLoans
+    .filter((loan) => {
+      const book = books.find(b => b.id === loan.bookId);
+      const searchLower = searchTerm.toLowerCase();
+
+      return (
+        loan.borrowerName?.toLowerCase().includes(searchLower) || 
+        loan.borrowerContact?.toLowerCase().includes(searchLower) ||
+        book?.title.toLowerCase().includes(searchLower)
+      );
+    })
+    .sort((a, b) => {
+      const dateA = a.borrowDate ? new Date(a.borrowDate).getTime() : 0;
+      const dateB = b.borrowDate ? new Date(b.borrowDate).getTime() : 0;
+      return dateB - dateA;
+    });
 
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookId || !borrowerName || !returnDate) return;
 
-    // Envia os dados salvando nos dois formatos para o banco aceitar sem quebrar
+    // 3. ENVIO: Mantém as propriedades que o seu addLoan/Supabase esperam receber
+    // Nota: Se o seu addLoan envia direto para o Supabase, ele precisará converter para snake_case lá dentro.
+    // Para garantir o funcionamento temporário, mantive o payload híbrido mapeado de forma explícita.
     addLoan({
       bookId,
       book_id: bookId,
@@ -173,16 +188,12 @@ export const Emprestimos: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredLoans.map((loan: any) => {
-                  const currentBookId = loan.book_id || loan.bookId;
-                  const book = books.find(b => b.id === currentBookId);
-                  const isReturned = !!(loan.returned_at || loan.returnedAt);
+                filteredLoans.map((loan) => {
+                  const book = books.find(b => b.id === loan.bookId);
+                  const isReturned = !!loan.returnedAt;
                   
-                  const loanDateRaw = loan.loan_date || loan.loanDate;
-                  const dueDateRaw = loan.due_date || loan.dueDate;
-
-                  const loanDateObj = loanDateRaw ? new Date(loanDateRaw) : new Date();
-                  const dueDateObj = dueDateRaw ? new Date(dueDateRaw) : new Date();
+                  const loanDateObj = loan.borrowDate ? new Date(loan.borrowDate) : new Date();
+                  const dueDateObj = loan.returnDate ? new Date(loan.returnDate) : new Date();
                   const isOverdue = !isReturned && dueDateObj < today;
                   
                   return (
@@ -191,8 +202,8 @@ export const Emprestimos: React.FC = () => {
                         <p className="font-medium text-white text-sm">{book?.title || 'Livro Removido'}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="font-medium text-white text-sm">{loan.borrower_name || loan.borrowerName}</p>
-                        <p className="text-[11px] text-white/40">{loan.borrower_email || loan.borrowerEmail || ''}</p>
+                        <p className="font-medium text-white text-sm">{loan.borrowerName}</p>
+                        <p className="text-[11px] text-white/40">{loan.borrowerContact || ''}</p>
                       </td>
                       <td className="px-6 py-4 text-xs text-white/60">
                         {loanDateObj.toLocaleDateString('pt-BR')}
@@ -219,7 +230,7 @@ export const Emprestimos: React.FC = () => {
                         {!isReturned && (
                           <button 
                             onClick={() => {
-                              if(confirm(`Confirmar devolução do livro "${book?.title}" por ${loan.borrower_name || loan.borrowerName}?`)) {
+                              if(confirm(`Confirmar devolução do livro "${book?.title}" por ${loan.borrowerName}?`)) {
                                 returnLoan(loan.id);
                               }
                             }}

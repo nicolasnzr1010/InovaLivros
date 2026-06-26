@@ -1,20 +1,33 @@
 import React from 'react';
 import { useData } from '../context/DataContext';
-import { BookOpen, Users, Clock, AlertTriangle } from 'lucide-react';
+import { BookOpen, Clock, AlertTriangle } from 'lucide-react';
+import { Loan } from '../types'; // Importação do seu tipo global
 
 export const Dashboard: React.FC = () => {
-  const { books, loans } = useData();
+  const { books, loans: rawLoans } = useData();
 
   const totalBooks = books.length;
   const availableBooks = books.filter((b) => b.status === 'Disponível').length;
-  const activeLoans = loans.filter((l) => !l.returnedAt);
-  
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // 1. NORMALIZAÇÃO: Transforma o array do banco (snake_case ou híbrido) em camelCase tipado
+  const normalizedLoans: Loan[] = (rawLoans || []).map((l: any) => ({
+    id: l.id,
+    bookId: l.book_id || l.bookId,
+    borrowerName: l.borrower_name || l.borrowerName,
+    borrowerContact: l.borrower_email || l.borrowerContact || l.borrowerEmail,
+    borrowDate: l.loan_date || l.borrowDate || l.loanDate,
+    returnDate: l.due_date || l.returnDate || l.dueDate,
+    returnedAt: l.returned_at !== undefined ? l.returned_at : l.returnedAt
+  }));
+
+  // 2. FILTRAGEM SEGURA: Baseada no contrato estrito do tipo Loan
+  const activeLoans = normalizedLoans.filter((l) => !l.returnedAt);
   
-  // Corrigido: l.returnDate mapeado para l.dueDate vindo do Supabase
-  const overdueLoans = activeLoans.filter((l: any) => {
-    const returnDate = l.dueDate ? new Date(l.dueDate) : new Date();
+  const overdueLoans = activeLoans.filter((l) => {
+    const returnDate = l.returnDate ? new Date(l.returnDate) : new Date();
     return returnDate < today;
   });
 
@@ -32,6 +45,7 @@ export const Dashboard: React.FC = () => {
         <p className="text-white/50 mt-1">Acompanhe o status do acervo da Secretaria.</p>
       </header>
 
+      {/* Grid de Cards de Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat, idx) => {
           const Icon = stat.icon;
@@ -50,17 +64,16 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Seção de Empréstimos Recentes */}
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-sm">
           <h3 className="font-semibold text-lg mb-4 text-white">Empréstimos Recentes</h3>
           {activeLoans.length === 0 ? (
             <p className="text-white/40 text-sm">Nenhum empréstimo ativo no momento.</p>
           ) : (
             <div className="space-y-4">
-              {activeLoans.slice(0, 5).map(loan => {
+              {activeLoans.slice(0, 5).map((loan) => {
                 const book = books.find(b => b.id === loan.bookId);
-                
-                // Corrigido: Extraindo o objeto de data a partir da propriedade correta do banco (dueDate)
-                const dueDateObj = (loan as any).dueDate ? new Date((loan as any).dueDate) : new Date();
+                const dueDateObj = loan.returnDate ? new Date(loan.returnDate) : new Date();
                 const isOverdue = dueDateObj < today;
                 
                 return (
@@ -82,13 +95,14 @@ export const Dashboard: React.FC = () => {
           )}
         </div>
 
+        {/* Seção de Livros Adicionados Recentemente */}
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-sm">
           <h3 className="font-semibold text-lg mb-4 text-white">Livros Adicionados Recentemente</h3>
           {books.length === 0 ? (
             <p className="text-white/40 text-sm">O acervo está vazio.</p>
           ) : (
             <div className="space-y-4">
-              {books.slice().reverse().slice(0, 5).map(book => (
+              {books.slice().reverse().slice(0, 5).map((book) => (
                 <div key={book.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/10 group hover:bg-white/10 transition-colors">
                   <img src={book.photoUrl} alt={book.title} className="w-10 h-14 object-cover rounded shadow-sm opacity-90 group-hover:opacity-100" />
                   <div className="flex flex-col flex-1">
