@@ -20,9 +20,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [books, setBooks] = useState<Book[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
 
-  // Carrega os dados mapeando corretamente na entrada
+  // Carrega os dados iniciais do Supabase mapeando para o estado do React
   useEffect(() => {
     const fetchInitialData = async () => {
+      // 1. Busca os livros cadastrados
       const { data: fetchedBooks, error: booksError } = await supabase
         .from('books')
         .select('*');
@@ -31,14 +32,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setBooks(fetchedBooks as Book[]);
       }
 
+      // 2. Busca os empréstimos cadastrados na tabela 'emprestimos'
       const { data: fetchedLoans, error: loansError } = await supabase
         .from('emprestimos') 
         .select('*');
 
       if (!loansError && fetchedLoans) {
+        // Normaliza os dados vindos do banco (snake_case) para o tipo do React (camelCase)
         const formattedLoans = fetchedLoans.map((l: any) => ({
-          ...l,
-          returnedAt: l.returnedAt || undefined
+          id: l.id,
+          bookId: l.book_id || l.bookId,
+          borrowerName: l.borrower_name || l.borrowerName,
+          borrowerContact: l.borrower_email || l.borrowerContact || l.borrowerEmail,
+          borrowDate: l.loan_date || l.borrowDate || l.loanDate,
+          returnDate: l.due_date || l.returnDate || l.dueDate,
+          returnedAt: l.returned_at !== null && l.returned_at !== undefined ? l.returned_at : (l.returnedAt || undefined)
         }));
         setLoans(formattedLoans);
       }
@@ -84,17 +92,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 🛠️ MÉTODO EDUCATIVO: Função addLoan corrigida com mapeamento seguro de propriedades
+  // 🛠️ MÉTODO EDUCATIVO: Função addLoan corrigida com mapeamento em snake_case para o Supabase
   const addLoan = async (loanData: any) => {
     const loanId = generateId();
     
-    // Captura os valores de forma segura aceitando tanto camelCase quanto formatos híbridos
+    // Captura os dados enviados pelo formulário com segurança de propriedades híbridas
     const bId = loanData.bookId || loanData.book_id;
     const bName = loanData.borrowerName || loanData.borrower_name;
     const bContact = loanData.borrowerContact || loanData.borrowerEmail || loanData.borrower_email;
     const bDate = loanData.borrowDate || loanData.loan_date || new Date().toISOString();
     const rDate = loanData.returnDate || loanData.due_date;
 
+    // Objeto usado internamente no front-end em formato camelCase
     const newLoan: Loan = {
       id: loanId,
       bookId: bId,
@@ -105,57 +114,64 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       returnedAt: undefined,
     };
 
-    // 1. Salva primeiro no banco de dados para garantir consistência
+    // DOCUMENTAÇÃO: Mapeia as propriedades locais para os nomes exatos das colunas do seu banco
     const { error: loanError } = await supabase.from('emprestimos').insert([
       {
         id: newLoan.id,
-        bookId: newLoan.bookId,
-        borrowerName: newLoan.borrowerName,
-        borrowerEmail: newLoan.borrowerContact, // Mapeia o contato para a coluna borrowerEmail da tabela
-        loanDate: newLoan.borrowDate,
-        dueDate: newLoan.returnDate,           
-        returnedAt: null
+        book_id: newLoan.bookId,         // Correção: de bookId para book_id
+        borrower_name: newLoan.borrowerName, // Correção: de borrowerName para borrower_name
+        borrower_email: newLoan.borrowerContact, 
+        loan_date: newLoan.borrowDate,   // Correção: de loanDate para loan_date
+        due_date: newLoan.returnDate,     // Correção: de dueDate para due_date
+        returned_at: null                // Correção: de returnedAt para returned_at
       }
     ]);
 
-    // Se houver erro na inserção da locação, interrompe aqui e joga para o catch do formulário!
+    // Se houver algum erro de coluna no Supabase, joga o erro para o formulário não fechar
     if (loanError) {
       console.error('Erro no Supabase ao inserir empréstimo:', loanError.message);
       throw new Error(loanError.message);
     }
 
+    // Atualiza o status do livro no Supabase para 'Emprestado'
     const { error: bookError } = await supabase.from('books').update({ status: 'Emprestado' }).eq('id', bId);
     if (bookError) {
       console.error('Erro no Supabase ao atualizar livro:', bookError.message);
       throw new Error(bookError.message);
     }
 
-    // 2. DOCUMENTAÇÃO: Se gravou com sucesso no banco, atualiza os estados locais da aplicação
+    // Somente se as duas queries acima derem certo, atualizamos a tela local do React
     setLoans((prev: Loan[]) => [newLoan, ...prev]);
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === bId ? { ...b, status: 'Emprestado' } : b)));
   };
 
+  // 🛠️ MÉTODO EDUCATIVO: Função returnLoan corrigida com returned_at em snake_case
   const returnLoan = async (id: string) => {
     const loan = loans.find((l: Loan) => l.id === id);
     if (!loan) return;
 
-    const returnedAt = new Date().toISOString();
+    const returnedAtStr = new Date().toISOString();
 
-    // Atualiza na tabela 'emprestimos'
-    const { error: loanError } = await supabase.from('emprestimos').update({ returnedAt }).eq('id', id);
+    // Atualiza no banco de dados Supabase usando a coluna em snake_case
+    const { error: loanError } = await supabase
+      .from('emprestimos')
+      .update({ returned_at: returnedAtStr }) // Correção: de returnedAt para returned_at
+      .eq('id', id);
+
     if (loanError) {
       console.error('Erro no Supabase ao devolver:', loanError.message);
       throw new Error(loanError.message);
     }
 
+    // Atualiza o livro para disponível de volta no banco
     const { error: bookError } = await supabase.from('books').update({ status: 'Disponível' }).eq('id', loan.bookId);
     if (bookError) {
       console.error('Erro no Supabase ao liberar livro:', bookError.message);
       throw new Error(bookError.message);
     }
 
-    // Atualiza estados locais apenas se o banco confirmou a alteração
-    setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt } : l)));
+    // Atualiza o estado local do React
+    setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt: returnedAtStr } : l)));
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loan.bookId ? { ...b, status: 'Disponível' } : b)));
   };
 
