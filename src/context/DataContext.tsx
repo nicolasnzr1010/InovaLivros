@@ -38,15 +38,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .select('*');
 
       if (!loansError && fetchedLoans) {
-        // Normaliza os dados vindos do banco (snake_case) para o tipo do React (camelCase)
+        // DOCUMENTAÇÃO: Mapeia as colunas em português do banco para o padrão CamelCase do React
         const formattedLoans = fetchedLoans.map((l: any) => ({
           id: l.id,
-          bookId: l.book_id || l.bookId,
-          borrowerName: l.borrower_name || l.borrowerName,
-          borrowerContact: l.borrower_email || l.borrowerContact || l.borrowerEmail,
-          borrowDate: l.loan_date || l.borrowDate || l.loanDate,
-          returnDate: l.due_date || l.returnDate || l.dueDate,
-          returnedAt: l.returned_at !== null && l.returned_at !== undefined ? l.returned_at : (l.returnedAt || undefined)
+          bookId: l.livro_id,
+          borrowerName: l.nome_leitor,
+          borrowerContact: l.email_leitor,
+          borrowDate: l.data_emprestimo,
+          returnDate: l.data_devolucao_prevista,
+          returnedAt: l.data_devolucao_real || undefined
         }));
         setLoans(formattedLoans);
       }
@@ -92,18 +92,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 🛠️ MÉTODO EDUCATIVO: Função addLoan corrigida com mapeamento em snake_case para o Supabase
+  // 🛠️ MÉTODO EDUCATIVO: Função addLoan remapeada para as colunas reais do seu print do Supabase
   const addLoan = async (loanData: any) => {
     const loanId = generateId();
     
-    // Captura os dados enviados pelo formulário com segurança de propriedades híbridas
+    // Captura os dados do front de forma segura
     const bId = loanData.bookId || loanData.book_id;
     const bName = loanData.borrowerName || loanData.borrower_name;
     const bContact = loanData.borrowerContact || loanData.borrowerEmail || loanData.borrower_email;
-    const bDate = loanData.borrowDate || loanData.loan_date || new Date().toISOString();
+    const bDate = loanData.borrowDate || loanData.loan_date || new Date().toISOString().split('T')[0];
     const rDate = loanData.returnDate || loanData.due_date;
 
-    // Objeto usado internamente no front-end em formato camelCase
+    // Cria o objeto local que o React usa na listagem da tela
     const newLoan: Loan = {
       id: loanId,
       bookId: bId,
@@ -114,48 +114,51 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       returnedAt: undefined,
     };
 
-    // DOCUMENTAÇÃO: Mapeia as propriedades locais para os nomes exatos das colunas do seu banco
+    // DOCUMENTAÇÃO: Inserção alinhada 100% com os nomes das colunas da sua imagem
     const { error: loanError } = await supabase.from('emprestimos').insert([
       {
         id: newLoan.id,
-        book_id: newLoan.bookId,         // Correção: de bookId para book_id
-        borrower_name: newLoan.borrowerName, // Correção: de borrowerName para borrower_name
-        borrower_email: newLoan.borrowerContact, 
-        loan_date: newLoan.borrowDate,   // Correção: de loanDate para loan_date
-        due_date: newLoan.returnDate,     // Correção: de dueDate para due_date
-        returned_at: null                // Correção: de returnedAt para returned_at
+        livro_id: newLoan.bookId,                 // 👈 Vincula com 'livro_id'
+        nome_leitor: newLoan.borrowerName,         // 👈 Vincula com 'nome_leitor'
+        email_leitor: newLoan.borrowerContact,     // 👈 Vincula com 'email_leitor'
+        data_emprestimo: newLoan.borrowDate,       // 👈 Vincula com 'data_emprestimo'
+        data_devolucao_prevista: newLoan.returnDate, // 👈 Vincula com 'data_devolucao_prevista'
+        data_devolucao_real: null,                 // 👈 Vincula com 'data_devolucao_real'
+        status: 'No Prazo'                         // 👈 Salva o status inicial do empréstimo
       }
     ]);
 
-    // Se houver algum erro de coluna no Supabase, joga o erro para o formulário não fechar
     if (loanError) {
       console.error('Erro no Supabase ao inserir empréstimo:', loanError.message);
       throw new Error(loanError.message);
     }
 
-    // Atualiza o status do livro no Supabase para 'Emprestado'
+    // Atualiza o status do livro para 'Emprestado' na tabela de livros
     const { error: bookError } = await supabase.from('books').update({ status: 'Emprestado' }).eq('id', bId);
     if (bookError) {
       console.error('Erro no Supabase ao atualizar livro:', bookError.message);
       throw new Error(bookError.message);
     }
 
-    // Somente se as duas queries acima derem certo, atualizamos a tela local do React
+    // Atualiza os estados do React local apenas após o sucesso nos inserts do banco
     setLoans((prev: Loan[]) => [newLoan, ...prev]);
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === bId ? { ...b, status: 'Emprestado' } : b)));
   };
 
-  // 🛠️ MÉTODO EDUCATIVO: Função returnLoan corrigida com returned_at em snake_case
+  // 🛠️ MÉTODO EDUCATIVO: Função returnLoan remapeada para a coluna data_devolucao_real
   const returnLoan = async (id: string) => {
     const loan = loans.find((l: Loan) => l.id === id);
     if (!loan) return;
 
-    const returnedAtStr = new Date().toISOString();
+    const todayDateStr = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD para a coluna date
 
-    // Atualiza no banco de dados Supabase usando a coluna em snake_case
+    // Atualiza no banco de dados na coluna correspondente em português
     const { error: loanError } = await supabase
       .from('emprestimos')
-      .update({ returned_at: returnedAtStr }) // Correção: de returnedAt para returned_at
+      .update({ 
+        data_devolucao_real: todayDateStr, // 👈 Vincula com 'data_devolucao_real'
+        status: 'Devolvido'
+      }) 
       .eq('id', id);
 
     if (loanError) {
@@ -170,8 +173,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(bookError.message);
     }
 
-    // Atualiza o estado local do React
-    setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt: returnedAtStr } : l)));
+    // Atualiza a interface do usuário localmente
+    setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt: todayDateStr } : l)));
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loan.bookId ? { ...b, status: 'Disponível' } : b)));
   };
 
