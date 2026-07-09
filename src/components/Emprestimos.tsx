@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext'; 
 import { Plus, X, Search, CheckCircle } from 'lucide-react';
-import { Loan } from '../types'; // Certifique-se de importar o tipo Loan original
+import { Loan } from '../types'; 
 
 export const Emprestimos: React.FC = () => {
   const { books, loans: rawLoans, addLoan, returnLoan } = useData();
@@ -31,7 +31,7 @@ export const Emprestimos: React.FC = () => {
     returnedAt: l.returned_at !== undefined ? l.returned_at : l.returnedAt
   }));
 
-  // 2. FILTRAGEM E ORDENAÇÃO: Agora utiliza propriedades 100% tipadas em camelCase
+  // 2. FILTRAGEM E ORDENAÇÃO: Utiliza propriedades 100% tipadas em camelCase
   const filteredLoans = normalizedLoans
     .filter((loan) => {
       const book = books.find(b => b.id === loan.bookId);
@@ -49,30 +49,38 @@ export const Emprestimos: React.FC = () => {
       return dateB - dateA;
     });
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  // 3. MÉTODO EDUCATIVO: Função modificada para ser assíncrona (async)
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookId || !borrowerName || !returnDate) return;
 
-    // 3. ENVIO: Mantém as propriedades que o seu addLoan/Supabase esperam receber
-    // Nota: Se o seu addLoan envia direto para o Supabase, ele precisará converter para snake_case lá dentro.
-    // Para garantir o funcionamento temporário, mantive o payload híbrido mapeado de forma explícita.
-    addLoan({
-      bookId,
-      book_id: bookId,
-      borrowerName,
-      borrower_name: borrowerName,
-      borrowerEmail: borrowerContact,
-      borrower_email: borrowerContact,
-      loanDate: new Date().toISOString(),
-      loan_date: new Date().toISOString(),
-      dueDate: new Date(returnDate).toISOString(),
-      due_date: new Date(returnDate).toISOString(),
-    } as any);
-    
-    setBookId('');
-    setBorrowerName('');
-    setBorrowerContact('');
-    setIsAdding(false);
+    try {
+      // Aguarda a execução e o salvamento real no banco de dados
+      await addLoan({
+        bookId,
+        book_id: bookId,
+        borrowerName,
+        borrower_name: borrowerName,
+        borrowerEmail: borrowerContact,
+        borrower_email: borrowerContact,
+        loanDate: new Date().toISOString(),
+        loan_date: new Date().toISOString(),
+        dueDate: new Date(returnDate).toISOString(),
+        due_date: new Date(returnDate).toISOString(),
+      } as any);
+      
+      // DOCUMENTAÇÃO: Estas linhas SÓ rodam se o "await addLoan" NÃO disparar um erro.
+      setBookId('');
+      setBorrowerName('');
+      setBorrowerContact('');
+      setIsAdding(false);
+      
+      alert("Empréstimo registrado com sucesso!");
+    } catch (error) {
+      // Se houver falha de rede ou no Supabase, o erro é capturado aqui
+      console.error("Erro detalhado ao salvar empréstimo:", error);
+      alert("Houve um erro com o banco de dados. Os dados digitados não foram perdidos.");
+    }
   };
 
   return (
