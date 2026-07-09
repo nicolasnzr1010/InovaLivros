@@ -14,8 +14,6 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-const generateId = () => Math.random().toString(36).substring(2, 9);
-
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -38,7 +36,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .select('*');
 
       if (!loansError && fetchedLoans) {
-        // DOCUMENTAÇÃO: Mapeia as colunas em português do banco para o padrão CamelCase do React
         const formattedLoans = fetchedLoans.map((l: any) => ({
           id: l.id,
           bookId: l.livro_id,
@@ -56,19 +53,25 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const addBook = async (bookData: Omit<Book, 'id' | 'status' | 'createdAt'>) => {
-    const newBook: Book = {
-      ...bookData,
-      id: generateId(),
-      status: 'Disponível',
-      createdAt: new Date().toISOString(),
-    };
+    // Deixamos o Supabase gerar o id automático para novos livros se configurado como uuid
+    const { data, error } = await supabase
+      .from('books')
+      .insert([
+        {
+          ...bookData,
+          status: 'Disponível',
+          created_at: new Date().toISOString(),
+        }
+      ])
+      .select();
 
-    setBooks((prev: Book[]) => [...prev, newBook]);
-
-    const { error } = await supabase.from('books').insert([newBook]);
     if (error) {
       console.error('Erro no Supabase (addBook):', error);
       throw error;
+    }
+
+    if (data && data[0]) {
+      setBooks((prev: Book[]) => [...prev, data[0] as Book]);
     }
   };
 
@@ -92,20 +95,40 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // 🛠️ MÉTODO EDUCATIVO: Função addLoan remapeada para as colunas reais do seu print do Supabase
+  // 🛠️ MÉTODO EDUCATIVO: addLoan modificado para retornar o ID gerado pelo próprio Supabase
   const addLoan = async (loanData: any) => {
-    const loanId = generateId();
-    
-    // Captura os dados do front de forma segura
     const bId = loanData.bookId || loanData.book_id;
     const bName = loanData.borrowerName || loanData.borrower_name;
     const bContact = loanData.borrowerContact || loanData.borrowerEmail || loanData.borrower_email;
     const bDate = loanData.borrowDate || loanData.loan_date || new Date().toISOString().split('T')[0];
     const rDate = loanData.returnDate || loanData.due_date;
 
-    // Cria o objeto local que o React usa na listagem da tela
+    // DOCUMENTAÇÃO: Removemos o campo 'id' manual daqui. O Supabase (PostgreSQL) cria o UUID sozinho.
+    const { data: insertedData, error: loanError } = await supabase
+      .from('emprestimos')
+      .insert([
+        {
+          livro_id: bId,
+          nome_leitor: bName,
+          email_leitor: bContact,
+          data_emprestimo: bDate,
+          data_devolucao_prevista: rDate,
+          data_devolucao_real: null,
+          status: 'No Prazo'
+        }
+      ])
+      .select(); // O .select() nos devolve o objeto criado com o ID correto gerado pelo banco
+
+    if (loanError) {
+      console.error('Erro no Supabase ao inserir empréstimo:', loanError.message);
+      throw new Error(loanError.message);
+    }
+
+    // Captura o ID real em formato UUID gerado pelo Supabase
+    const realSupabaseId = insertedData && insertedData[0] ? insertedData[0].id : Math.random().toString();
+
     const newLoan: Loan = {
-      id: loanId,
+      id: realSupabaseId,
       bookId: bId,
       borrowerName: bName,
       borrowerContact: bContact,
@@ -114,49 +137,28 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       returnedAt: undefined,
     };
 
-    // DOCUMENTAÇÃO: Inserção alinhada 100% com os nomes das colunas da sua imagem
-    const { error: loanError } = await supabase.from('emprestimos').insert([
-      {
-        id: newLoan.id,
-        livro_id: newLoan.bookId,                 // 👈 Vincula com 'livro_id'
-        nome_leitor: newLoan.borrowerName,         // 👈 Vincula com 'nome_leitor'
-        email_leitor: newLoan.borrowerContact,     // 👈 Vincula com 'email_leitor'
-        data_emprestimo: newLoan.borrowDate,       // 👈 Vincula com 'data_emprestimo'
-        data_devolucao_prevista: newLoan.returnDate, // 👈 Vincula com 'data_devolucao_prevista'
-        data_devolucao_real: null,                 // 👈 Vincula com 'data_devolucao_real'
-        status: 'No Prazo'                         // 👈 Salva o status inicial do empréstimo
-      }
-    ]);
-
-    if (loanError) {
-      console.error('Erro no Supabase ao inserir empréstimo:', loanError.message);
-      throw new Error(loanError.message);
-    }
-
-    // Atualiza o status do livro para 'Emprestado' na tabela de livros
+    // Atualiza o status do livro na tabela 'books'
     const { error: bookError } = await supabase.from('books').update({ status: 'Emprestado' }).eq('id', bId);
     if (bookError) {
       console.error('Erro no Supabase ao atualizar livro:', bookError.message);
       throw new Error(bookError.message);
     }
 
-    // Atualiza os estados do React local apenas após o sucesso nos inserts do banco
+    // Atualiza o estado local do React sincronizado com o ID correto do banco
     setLoans((prev: Loan[]) => [newLoan, ...prev]);
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === bId ? { ...b, status: 'Emprestado' } : b)));
   };
 
-  // 🛠️ MÉTODO EDUCATIVO: Função returnLoan remapeada para a coluna data_devolucao_real
   const returnLoan = async (id: string) => {
     const loan = loans.find((l: Loan) => l.id === id);
     if (!loan) return;
 
-    const todayDateStr = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD para a coluna date
+    const todayDateStr = new Date().toISOString().split('T')[0];
 
-    // Atualiza no banco de dados na coluna correspondente em português
     const { error: loanError } = await supabase
       .from('emprestimos')
       .update({ 
-        data_devolucao_real: todayDateStr, // 👈 Vincula com 'data_devolucao_real'
+        data_devolucao_real: todayDateStr,
         status: 'Devolvido'
       }) 
       .eq('id', id);
@@ -166,14 +168,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(loanError.message);
     }
 
-    // Atualiza o livro para disponível de volta no banco
     const { error: bookError } = await supabase.from('books').update({ status: 'Disponível' }).eq('id', loan.bookId);
     if (bookError) {
       console.error('Erro no Supabase ao liberar livro:', bookError.message);
       throw new Error(bookError.message);
     }
 
-    // Atualiza a interface do usuário localmente
     setLoans((prev: Loan[]) => prev.map((l: Loan) => (l.id === id ? { ...l, returnedAt: todayDateStr } : l)));
     setBooks((prev: Book[]) => prev.map((b: Book) => (b.id === loan.bookId ? { ...b, status: 'Disponível' } : b)));
   };
