@@ -81,22 +81,28 @@ export const Acervo: React.FC = () => {
     }
   };
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !author) return;
 
-    addBook({
-      title,
-      author,
-      photoUrl: photoUrl || 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=400',
-      condition,
-    });
-    
-    setTitle('');
-    setAuthor('');
-    setPhotoUrl('');
-    setCondition('Bom');
-    setIsAdding(false);
+    try {
+      await addBook({
+        title,
+        author,
+        photoUrl: photoUrl || 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=400',
+        condition,
+      });
+      
+      // Limpa o formulário apenas se o livro for salvo com sucesso
+      setTitle('');
+      setAuthor('');
+      setPhotoUrl('');
+      setCondition('Bom');
+      setIsAdding(false);
+    } catch (error) {
+      console.error("Falha ao adicionar livro:", error);
+      alert("Não foi possível salvar o livro. Tente novamente.");
+    }
   };
 
   return (
