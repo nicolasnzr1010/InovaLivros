@@ -60,7 +60,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           ...bookData,
           status: 'Disponível',
-          created_at: new Date().toISOString(),
         }
       ])
       .select();
