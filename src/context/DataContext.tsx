@@ -61,13 +61,13 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ...bookData,
           status: 'Disponível',
         }
-      ])
-      .select();
+      ]);
 
     if (error) {
       console.error('Erro no Supabase (addBook):', error);
       throw error;
     }
+    // O .select() não é mais necessário aqui, o Supabase retorna os dados por padrão no 'data'
 
     if (data && data[0]) {
       setBooks((prev: Book[]) => [...prev, data[0] as Book]);
