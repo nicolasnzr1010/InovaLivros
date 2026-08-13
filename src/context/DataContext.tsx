@@ -63,16 +63,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           status: 'Disponível',
           createdAt: new Date().toISOString(), // Adiciona o timestamp atual
         }
-      ]);
+      ])
+      .select() // Pede ao Supabase para retornar o registro que foi inserido
+      .single(); // Espera um único objeto de volta, em vez de um array
 
     if (error) {
       console.error('Erro no Supabase (addBook):', error);
       throw error;
     }
 
-    // Com a inserção manual do ID, o 'data' pode vir nulo. Usamos o objeto que criamos.
-    if (!error) {
-      setBooks((prev: Book[]) => [...prev, { id: data[0].id, ...bookData, status: 'Disponível', createdAt: data[0].createdAt } as Book]);
+    // Agora 'data' conterá o livro completo inserido no banco de dados.
+    if (data) {
+      setBooks((prev: Book[]) => [...prev, data as Book]);
     }
   };
 
