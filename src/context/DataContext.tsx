@@ -60,6 +60,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           ...bookData,
           status: 'Disponível',
+          createdAt: new Date().toISOString(), // Adiciona o timestamp atual
         }
       ]);
 
