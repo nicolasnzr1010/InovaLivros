@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Book, Loan } from '../types';
+import { v4 as uuidv4 } from 'uuid'; // Importa a função para gerar UUIDs
 import { supabase } from '../supabaseClient'; 
 
 interface DataContextType {
@@ -53,11 +54,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const addBook = async (bookData: Omit<Book, 'id' | 'status' | 'createdAt'>) => {
-    // Deixamos o Supabase gerar o id automático para novos livros se configurado como uuid
     const { data, error } = await supabase
       .from('books')
       .insert([
         {
+          id: uuidv4(), // Gera um ID único no lado do cliente
           ...bookData,
           status: 'Disponível',
           createdAt: new Date().toISOString(), // Adiciona o timestamp atual
@@ -68,10 +69,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Erro no Supabase (addBook):', error);
       throw error;
     }
-    // O .select() não é mais necessário aqui, o Supabase retorna os dados por padrão no 'data'
 
-    if (data && data[0]) {
-      setBooks((prev: Book[]) => [...prev, data[0] as Book]);
+    // Com a inserção manual do ID, o 'data' pode vir nulo. Usamos o objeto que criamos.
+    if (!error) {
+      setBooks((prev: Book[]) => [...prev, { id: data[0].id, ...bookData, status: 'Disponível', createdAt: data[0].createdAt } as Book]);
     }
   };
 
