@@ -1,11 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { useData } from '../context/DataContext';
-import { Plus, Search, X, Upload, Image as ImageIcon } from 'lucide-react';
+import { Plus, Search, X, Upload, Image as ImageIcon, Pencil } from 'lucide-react';
 import { BookCondition } from '../types';
 import { supabase } from '../supabaseClient'; // Conexão necessária para o Storage
 
 export const Acervo: React.FC = () => {
-  const { books, addBook, deleteBook } = useData();
+  const { books, addBook, updateBook, deleteBook } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
@@ -14,9 +14,14 @@ export const Acervo: React.FC = () => {
   const [author, setAuthor] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [condition, setCondition] = useState<BookCondition>('Bom');
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [editUploadError, setEditUploadError] = useState('');
+  const [editUploading, setEditUploading] = useState(false);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   
   // Upload State
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -27,6 +32,12 @@ export const Acervo: React.FC = () => {
 
   // Função para fazer o upload do arquivo para o Supabase Storage
   const handleFileUpload = async (file: File) => {
+    if (uploading) return;
+    setUploadError('');
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setUploadError('Selecione uma imagem PNG, JPG ou WEBP.');
+      return;
+    }
     try {
       setUploading(true);
       
@@ -48,7 +59,19 @@ export const Acervo: React.FC = () => {
 
     } catch (error) {
       console.error('Erro ao fazer upload da imagem:', error);
-      alert('Falha ao enviar a imagem. Verifique as configurações do Storage.');
+      const message = error instanceof Error ? error.message : String(error);
+      const status = String((error as { statusCode?: string })?.statusCode || '');
+      if (status === '405' || /not allowed/i.test(message)) {
+        setUploadError('O servidor recusou o envio (405). Verifique se o endereço configurado oferece a API de Storage e se o proxy encaminha os uploads de /storage/v1/.');
+      } else if (/fetch|network|name_not_resolved/i.test(message)) {
+        setUploadError('Não foi possível conectar ao servidor de imagens. Verifique a conexão e o endereço do projeto em VITE_SUPABASE_URL.');
+      } else if (/bucket.*not found/i.test(message)) {
+        setUploadError('O bucket capas não foi encontrado no projeto Supabase configurado.');
+      } else if (/row-level|permission|unauthorized/i.test(message) || ['401', '403'].includes(status)) {
+        setUploadError('O Storage não autorizou o envio. Verifique a política de INSERT do bucket capas no Supabase.');
+      } else {
+        setUploadError(`Falha ao enviar a imagem: ${message}`);
+      }
     } finally {
       setUploading(false);
     }
@@ -81,9 +104,34 @@ export const Acervo: React.FC = () => {
     }
   };
 
+  const handleCoverReplacement = async (file: File, bookId: string) => {
+    if (editUploading) return;
+    setEditUploadError('');
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setEditUploadError('Selecione uma imagem PNG, JPG ou WEBP.');
+      return;
+    }
+    try {
+      setEditUploading(true);
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('capas').upload(fileName, file);
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from('capas').getPublicUrl(fileName);
+      await updateBook(bookId, { photoUrl: data.publicUrl });
+      setEditingBookId(null);
+    } catch (error) {
+      console.error('Erro ao substituir capa:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      setEditUploadError(`Falha ao substituir a capa: ${message}`);
+    } finally {
+      setEditUploading(false);
+    }
+  };
+
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !author) return;
+    if (!title || !author || uploading || uploadError) return;
 
     try {
       await addBook({
@@ -165,7 +213,8 @@ export const Acervo: React.FC = () => {
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileChange}
-                  accept="image/*"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={uploading}
                   className="hidden"
                 />
                 
@@ -186,6 +235,7 @@ export const Acervo: React.FC = () => {
                   </>
                 )}
               </div>
+              {uploadError && <p role="alert" className="text-sm text-red-400">{uploadError}</p>}
             </div>
 
             <div className="md:col-span-2 space-y-1">
@@ -204,7 +254,7 @@ export const Acervo: React.FC = () => {
             <div className="md:col-span-2 pt-2">
               <button 
                 type="submit" 
-                disabled={uploading}
+                disabled={uploading || !!uploadError}
                 className={`w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition-colors shadow-lg ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 Salvar Livro
@@ -242,6 +292,7 @@ export const Acervo: React.FC = () => {
                     alt={book.title} 
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
                     onError={(e) => {
+                      e.currentTarget.onerror = null;
                       (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=400';
                     }}
                   />
@@ -251,6 +302,27 @@ export const Acervo: React.FC = () => {
                     </span>
                   </div>
                 </div>
+                {editingBookId === book.id && (
+                  <div className="rounded-xl border border-blue-400/30 bg-blue-500/10 p-3 space-y-2">
+                    <input
+                      ref={editFileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      disabled={editUploading}
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleCoverReplacement(file, book.id);
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                    <button type="button" onClick={() => editFileInputRef.current?.click()} disabled={editUploading} className="w-full rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50">
+                      {editUploading ? 'Enviando...' : 'Escolher nova capa'}
+                    </button>
+                    {editUploadError && <p role="alert" className="text-xs text-red-300">{editUploadError}</p>}
+                    <button type="button" onClick={() => { setEditingBookId(null); setEditUploadError(''); }} className="w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70 hover:bg-white/20">Cancelar</button>
+                  </div>
+                )}
                 <div className="flex flex-col flex-1">
                   <h3 className="font-medium text-sm text-white line-clamp-1">{book.title}</h3>
                   <p className="text-xs text-white/40 mb-2">{book.author}</p>
@@ -259,6 +331,9 @@ export const Acervo: React.FC = () => {
                     <span className="text-[10px] text-white/50 uppercase tracking-widest font-semibold">
                       {book.condition}
                     </span>
+                    <button type="button" onClick={() => { setEditingBookId(book.id); setEditUploadError(''); }} className="text-[10px] bg-white/10 px-2 py-1 rounded text-blue-300 hover:bg-blue-500/20 transition-colors uppercase font-bold tracking-wider flex items-center gap-1">
+                      <Pencil className="w-3 h-3" /> Capa
+                    </button>
                     <button 
                       onClick={() => {
                         if(confirm('Tem certeza que deseja remover este livro?')) deleteBook(book.id);

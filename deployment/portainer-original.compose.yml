@@ -1,0 +1,23 @@
+services:
+  inova-livros:
+    image: nginx:1.27-alpine
+    container_name: inova-livros
+    restart: unless-stopped
+    ports: ["8082:80"]
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        wget -q --header="Authorization: Bearer $$GITHUB_TOKEN" https://api.github.com/repos/sectidev/InovaLivros/tarball/main -O /tmp/app.tar.gz
+        mkdir -p /tmp/app
+        tar -xzf /tmp/app.tar.gz --strip-components=1 -C /tmp/app
+        cp -r /tmp/app/dist/. /usr/share/nginx/html/
+        cp /tmp/app/nginx.conf /etc/nginx/conf.d/default.conf
+        unset GITHUB_TOKEN
+        exec nginx -g 'daemon off;'
+    networks: [secti]
+networks:
+  secti:
+    external: true
+
